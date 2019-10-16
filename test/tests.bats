@@ -645,11 +645,6 @@ function count_processed_changes() {
   assert_success
 }
 
-@test "checking SRS: SRS_DOMAINNAME is used correctly" {
-  run docker exec mail_srs_domainname grep "SRS_DOMAIN=srs.my-domain.com" /etc/default/postsrsd
-  assert_success
-}
-
 @test "checking SRS: OVERRIDE_HOSTNAME is handled correctly" {
   run docker exec mail_override_hostname grep "SRS_DOMAIN=my-domain.com" /etc/default/postsrsd
   assert_success
