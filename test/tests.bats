@@ -1,6 +1,6 @@
 load 'test_helper/bats-support/load'
 load 'test_helper/bats-assert/load'
-
+load 'test_helper/common'
 
 #
 # shared functions
@@ -23,6 +23,74 @@ function count_processed_changes() {
   docker exec $containerName cat /var/log/supervisor/changedetector.log | grep "Update checksum" | wc -l
 }
 
+setup() {
+    run_setup_file_if_necessary
+}
+
+teardown() {
+    run_teardown_file_if_necessary
+}
+
+setup_file() {
+    docker run -d --name mail \
+      -v "`pwd`/test/config":/tmp/docker-mailserver \
+      -v "`pwd`/test/test-files":/tmp/docker-mailserver-test:ro \
+      -v "`pwd`/test/onedir":/var/mail-state \
+      -e ENABLE_CLAMAV=1 \
+      -e SPOOF_PROTECTION=1 \
+      -e ENABLE_SPAMASSASSIN=1 \
+      -e REPORT_RECIPIENT=user1@localhost.localdomain \
+      -e REPORT_SENDER=report1@mail.my-domain.com \
+      -e SA_TAG=-5.0 \
+      -e SA_TAG2=2.0 \
+      -e SA_KILL=3.0 \
+      -e SA_SPAM_SUBJECT="SPAM: " \
+      -e VIRUSMAILS_DELETE_DELAY=7 \
+      -e ENABLE_SRS=1 \
+      -e SASL_PASSWD="external-domain.com username:password" \
+      -e ENABLE_MANAGESIEVE=1 \
+      --cap-add=SYS_PTRACE \
+      -e PERMIT_DOCKER=host \
+      -e DMS_DEBUG=0 \
+      -h mail.my-domain.com -t ${NAME}
+    wait_for_finished_setup_in_container mail
+
+    # add account after container started
+    docker run --rm -e MAIL_USER=added@localhost.localdomain -e MAIL_PASS=mypassword -t ${NAME} /bin/sh -c 'echo "$$MAIL_USER|$$(doveadm pw -s SHA512-CRYPT -u $$MAIL_USER -p $$MAIL_PASS)"' >> test/config/postfix-accounts.cf
+
+    # Setup sieve & create filtering folder (INBOX/spam)
+    docker cp "`pwd`/test/config/sieve/dovecot.sieve" mail:/var/mail/localhost.localdomain/user1/.dovecot.sieve
+    docker exec mail /bin/sh -c "maildirmake.dovecot /var/mail/localhost.localdomain/user1/.INBOX.spam"
+    docker exec mail /bin/sh -c "chown 5000:5000 -R /var/mail/localhost.localdomain/user1/.INBOX.spam"
+
+    wait_for_smtp_port_in_container mail
+    # Sending test mails
+    docker exec mail /bin/sh -c "nc 0.0.0.0 25 < /tmp/docker-mailserver-test/email-templates/amavis-spam.txt"
+    docker exec mail /bin/sh -c "nc 0.0.0.0 25 < /tmp/docker-mailserver-test/email-templates/amavis-virus.txt"
+    docker exec mail /bin/sh -c "nc 0.0.0.0 25 < /tmp/docker-mailserver-test/email-templates/existing-alias-external.txt"
+    docker exec mail /bin/sh -c "nc 0.0.0.0 25 < /tmp/docker-mailserver-test/email-templates/existing-alias-local.txt"
+    docker exec mail /bin/sh -c "nc 0.0.0.0 25 < /tmp/docker-mailserver-test/email-templates/existing-alias-recipient-delimiter.txt"
+    docker exec mail /bin/sh -c "nc 0.0.0.0 25 < /tmp/docker-mailserver-test/email-templates/existing-user1.txt"
+    docker exec mail /bin/sh -c "nc 0.0.0.0 25 < /tmp/docker-mailserver-test/email-templates/existing-user2.txt"
+    docker exec mail /bin/sh -c "nc 0.0.0.0 25 < /tmp/docker-mailserver-test/email-templates/existing-added.txt"
+    docker exec mail /bin/sh -c "nc 0.0.0.0 25 < /tmp/docker-mailserver-test/email-templates/existing-user-and-cc-local-alias.txt"
+    docker exec mail /bin/sh -c "nc 0.0.0.0 25 < /tmp/docker-mailserver-test/email-templates/existing-regexp-alias-external.txt"
+    docker exec mail /bin/sh -c "nc 0.0.0.0 25 < /tmp/docker-mailserver-test/email-templates/existing-regexp-alias-local.txt"
+    docker exec mail /bin/sh -c "nc 0.0.0.0 25 < /tmp/docker-mailserver-test/email-templates/existing-catchall-local.txt"
+    docker exec mail /bin/sh -c "nc 0.0.0.0 25 < /tmp/docker-mailserver-test/email-templates/sieve-spam-folder.txt"
+    docker exec mail /bin/sh -c "nc 0.0.0.0 25 < /tmp/docker-mailserver-test/email-templates/sieve-pipe.txt"
+    docker exec mail /bin/sh -c "nc 0.0.0.0 25 < /tmp/docker-mailserver-test/email-templates/non-existing-user.txt"
+    docker exec mail /bin/sh -c "sendmail root < /tmp/docker-mailserver-test/email-templates/root-email.txt"
+}
+
+teardown_file() {
+    docker rm -f mail
+}
+
+@test "first" {
+    skip 'only used to call setup_file from setup'
+}
+
 #
 # configuration checks
 #
@@ -37,6 +105,7 @@ function count_processed_changes() {
 #
 
 @test "checking process: postfix" {
+  repeat_until_success_or_timeout 60 /bin/bash -c "ps aux --forest | grep -v grep | grep '/usr/lib/postfix/sbin/master'"
   run docker exec mail /bin/bash -c "ps aux --forest | grep -v grep | grep '/usr/lib/postfix/sbin/master'"
   assert_success
 }
@@ -169,6 +238,7 @@ function count_processed_changes() {
 }
 
 @test "checking smtp: delivers mail to existing account" {
+  repeat_until_success_or_timeout 60 docker exec mail /bin/sh -c '[ `grep postfix/lmtp /var/log/mail/mail.log | grep status=sent | grep " Saved)" | wc -l` -eq 12 ]'
   run docker exec mail /bin/sh -c "grep 'postfix/lmtp' /var/log/mail/mail.log | grep 'status=sent' | grep ' Saved)' | wc -l"
   assert_success
   assert_output 12
@@ -347,7 +417,14 @@ function count_processed_changes() {
 }
 
 @test "checking opendkim: /etc/opendkim/KeyTable dummy file generated without keys provided" {
-  run docker exec mail_smtponly_without_config /bin/bash -c "cat /etc/opendkim/KeyTable"
+  docker run --rm -d --name mail_smtponly_without_config \
+		-e SMTP_ONLY=1 \
+		-e ENABLE_LDAP=1 \
+		-e PERMIT_DOCKER=network \
+		-e OVERRIDE_HOSTNAME=mail.mydomain.com \
+		-t ${NAME}
+  repeat_until_success_or_timeout 120 cat /etc/opendkim/KeyTable
+  run docker exec mail_smtponly_without_config cat /etc/opendkim/KeyTable
   assert_success
 }
 
@@ -838,6 +915,9 @@ function count_processed_changes() {
 
 
 @test "checking user login: predefined user can login" {
+  docker exec mail addmailuser pass@localhost.localdomain 'may be \a `p^a.*ssword'
+  repeat_until_success_or_timeout 60 /bin/bash -c "doveadm auth test -x service=smtp pass@localhost.localdomain 'may be \\a \`p^a.*ssword' | grep 'passdb'"
+
   run docker exec mail /bin/bash -c "doveadm auth test -x service=smtp pass@localhost.localdomain 'may be \\a \`p^a.*ssword' | grep 'passdb'"
   assert_output "passdb: pass@localhost.localdomain auth succeeded"
 }
@@ -1206,4 +1286,8 @@ function count_processed_changes() {
 @test "checking that the container stops cleanly" {
   run docker stop -t 60 mail
   assert_success
+}
+
+@test "last" {
+    skip 'only used to call teardown_file from teardown'
 }
