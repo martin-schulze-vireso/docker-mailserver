@@ -650,10 +650,6 @@ function count_processed_changes() {
   assert_success
 }
 
-@test "checking SRS: DOMAINNAME is handled correctly" {
-  run docker exec mail_domainname grep "SRS_DOMAIN=my-domain.com" /etc/default/postsrsd
-  assert_success
-}
 @test "checking SRS: fallback to hostname is handled correctly" {
   run docker exec mail grep "SRS_DOMAIN=my-domain.com" /etc/default/postsrsd
   assert_success
