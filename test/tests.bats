@@ -745,6 +745,7 @@ EOF
 }
 
 @test "checking amavis: VIRUSMAILS_DELETE_DELAY override works as expected" {
+  # shellcheck disable=SC2016
   run docker run --rm -e VIRUSMAILS_DELETE_DELAY=2 "${IMAGE_NAME:?}" /bin/bash -c 'echo "${VIRUSMAILS_DELETE_DELAY}"'
   assert_output 2
 }
@@ -921,7 +922,7 @@ EOF
   sleep 2
   changepass=$(docker exec mail /bin/sh -c "grep '^user4@domain\.tld' -i /tmp/docker-mailserver/postfix-accounts.cf")
 
-  [ "$initialpass" != "$changepass" ]
+  [ "${initialpass}" != "${changepass}" ]
 
   docker exec mail /bin/sh -c "delmailuser -y auser3@domain.tld"
 
@@ -1410,7 +1411,7 @@ EOF
 @test "checking setup.sh: setup.sh debug inspect" {
   run ./setup.sh -c mail debug inspect
   assert_success
-  assert_line --index 0 "Image: tvial/docker-mailserver:testing"
+  assert_line --index 0 "Image: ${NAME}"
   assert_line --index 1 "Container: mail"
 }
 @test "checking setup.sh: setup.sh debug login ls" {
@@ -1592,5 +1593,5 @@ EOF
 }
 
 @test "last" {
-  # this test is only there to reliably mark the end for the teardown_file
+  skip 'this test is only there to reliably mark the end for the teardown_file (test.bats finished)'
 }

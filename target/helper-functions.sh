@@ -1,10 +1,5 @@
 #! /bin/bash
 
-# version  0.1.1
-#
-# Provides varous helpers.
-
-
 # ? IP and CIDR -------------------------------------------
 
 
@@ -207,6 +202,7 @@ function _monitored_files_checksums
       dovecot-quotas.cf \
       /etc/letsencrypt/acme.json \
       "/etc/letsencrypt/live/${HOSTNAME}/key.pem" \
+      "/etc/letsencrypt/live/${HOSTNAME}/privkey.pem" \
       "/etc/letsencrypt/live/${HOSTNAME}/fullchain.pem"
   )
 }

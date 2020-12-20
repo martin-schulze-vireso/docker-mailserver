@@ -1,7 +1,7 @@
-#!/bin/bash
+#! /bin/bash
 
 # Wrapper for various setup scripts
-# included in the docker-mailserver
+# included in docker-mailserver
 
 SCRIPT='SETUP'
 
@@ -27,7 +27,7 @@ function _unset_vars
 {
   unset CDIR CRI INFO IMAGE_NAME CONTAINER_NAME DEFAULT_CONFIG_PATH
   unset USE_CONTAINER WISHED_CONFIG_PATH CONFIG_PATH VOLUME USE_TTY
-  unset SCRIPT
+  unset SCRIPT USING_SELINUX
 }
 
 function _get_current_directory
@@ -55,6 +55,7 @@ WISHED_CONFIG_PATH=
 CONFIG_PATH=
 VOLUME=
 USE_TTY=
+USING_SELINUX=
 
 function _check_root
 {
@@ -116,6 +117,14 @@ OPTIONS:
 
   -h                Show this help dialogue
 
+  -z                Allow container access to the bind mount content
+                    that is shared among multiple containers
+                    on a SELinux-enabled host.
+
+  -Z                Allow container access to the bind mount content
+                    that is private and unshared with other containers
+                    on a SELinux-enabled host.
+
 SUBCOMMANDS:
 
   email:
@@ -173,6 +182,7 @@ function _docker_image
 {
   if ${USE_CONTAINER}
   then
+    echo "Running: " ${CRI} exec "${USE_TTY}" "${CONTAINER_NAME}" "${@}" >&2
     # reuse existing container specified on command line
     ${CRI} exec "${USE_TTY}" "${CONTAINER_NAME}" "${@}"
   else
@@ -184,7 +194,7 @@ function _docker_image
     fi
 
     ${CRI} run --rm \
-      -v "${CONFIG_PATH}":/tmp/docker-mailserver \
+      -v "${CONFIG_PATH}":/tmp/docker-mailserver"${USING_SELINUX}" \
       "${USE_TTY}" "${IMAGE_NAME}" "${@}"
   fi
 }
@@ -222,17 +232,22 @@ function _main
 
   IMAGE_NAME=${INFO%;*}
   CONTAINER_NAME=${INFO#*;}
+  # echo "DEBUG: INFO=${INFO}"
+  # echo "DEBUG: PRE_IMAGE_NAME=${IMAGE_NAME}"
+  echo "DEBUG: PRE_CONTAINER_NAME=${CONTAINER_NAME}"
 
   if [[ -z ${IMAGE_NAME} ]]
   then
     if [[ ${CRI} == "docker" ]]
     then
-      IMAGE_NAME=tvial/docker-mailserver:latest
+      IMAGE_NAME=${NAME}
     elif [[ ${CRI} == "podman" ]]
     then
-      IMAGE_NAME=docker.io/tvial/docker-mailserver:latest
+      IMAGE_NAME=docker.io/${NAME}
     fi
   fi
+
+  # echo "DEBUG: POST_IMAGE_NAME=${IMAGE_NAME}"
 
   if tty -s
   then
@@ -240,15 +255,28 @@ function _main
   fi
 
   local OPTIND
-  while getopts ":c:i:p:h" OPT
+  while getopts ":c:i:p:hzZ" OPT
   do
     case ${OPT} in
-      c) CONTAINER_NAME="${OPTARG}" ; USE_CONTAINER=true ;; # container specified, connect to running instance
-      i) IMAGE_NAME="${OPTARG}" ;;
-      p)
+      i ) IMAGE_NAME="${OPTARG}" ;;
+      z ) USING_SELINUX=":z"     ;;
+      Z ) USING_SELINUX=":Z"     ;;
+      c )
+        # container specified, connect to running instance
+        CONTAINER_NAME="${OPTARG}"
+        USE_CONTAINER=true
+        echo "Using container $CONTAINER_NAME" >&2
+        ;;
+
+      h )
+        _usage
+        return
+        ;;
+
+      p )
         case "${OPTARG}" in
-          /*) WISHED_CONFIG_PATH="${OPTARG}" ;;
-          * ) WISHED_CONFIG_PATH="${CDIR}/${OPTARG}" ;;
+          /* ) WISHED_CONFIG_PATH="${OPTARG}"         ;;
+          *  ) WISHED_CONFIG_PATH="${CDIR}/${OPTARG}" ;;
         esac
 
         if [[ ! -d ${WISHED_CONFIG_PATH} ]]
@@ -258,11 +286,15 @@ function _main
           exit 40
         fi
         ;;
-      h) _usage ; return ;;
-     *) echo "Invalid option: -${OPTARG}" >&2 ;;
+
+      * )
+        echo "Invalid option: -${OPTARG}" >&2
+        ;;
+
     esac
   done
-  shift $((OPTIND-1))
+
+  shift $(( OPTIND - 1 ))
 
   if [[ -z ${WISHED_CONFIG_PATH} ]]
   then

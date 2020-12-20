@@ -19,7 +19,7 @@ A fullstack but simple mail server (SMTP, IMAP, Antispam, Antivirus...).
 Only configuration files, no SQL database. Keep it simple and versioned.
 Easy to deploy and upgrade.
 
-[Why was this image was created?](http://tvi.al/simple-mail-server-with-docker/)
+[Why this image was created.](http://tvi.al/simple-mail-server-with-docker/)
 
 1. [Announcements](#announcements)
 2. [Includes](#includes)
@@ -32,13 +32,10 @@ Easy to deploy and upgrade.
 ## Announcements
 
 1. Since version `v7.1.0`, the use of default variables has changed slightly. Please consult the [environment Variables](#environment-variables) sections
-2. Debian Buster is now Docker base image
-   - Filebeat was removed
-   - Dovecot was downgraded
-3. ELK was removed
-4. New contributing guidelines were added
-5. Added coherent coding style and linting
-6. Added option to use non-default network interface
+2. New contributing guidelines were added
+3. Added coherent coding style and linting
+4. Added option to use non-default network interface
+5. SELinux is now supported
 
 ## Includes
 
@@ -88,13 +85,13 @@ Minimum:
 
 ### Get the tools
 
-Download the `docker-compose.yml`, `.env`, `env-mailserver` and the `setup.sh` files:
+Download the `docker-compose.yml`, `compose.env`, `mailserver.env` and the `setup.sh` files:
 
 ``` BASH
 wget https://raw.githubusercontent.com/tomav/docker-mailserver/master/setup.sh
 wget https://raw.githubusercontent.com/tomav/docker-mailserver/master/docker-compose.yml
-wget https://raw.githubusercontent.com/tomav/docker-mailserver/master/env-mailserver
-curl -o .env https://raw.githubusercontent.com/tomav/docker-mailserver/master/template.env
+wget https://raw.githubusercontent.com/tomav/docker-mailserver/master/mailserver.env
+curl -o .env https://raw.githubusercontent.com/tomav/docker-mailserver/master/compose.env
 
 chmod a+x ./setup.sh
 ```
@@ -102,34 +99,66 @@ chmod a+x ./setup.sh
 ### Create a docker-compose environment
 
 - [Install the latest docker-compose](https://docs.docker.com/compose/install/)
-- Edit the files `.env` and `env-mailserver` to your liking:
+- Edit the files `.env` and `mailserver.env` to your liking:
   - `.env` contains the configuration for docker-compose
-  - `env-mailserver` contains the configuration for the mailserver container
+  - `mailserver.env` contains the configuration for the mailserver container
   - These files supports only simple `VAR=VAL` lines (see [Documentation](https://docs.docker.com/compose/env-file/)).
   - Don't quote your values.
   - Variable substitution is *not* supported (e.g. `OVERRIDE_HOSTNAME=$HOSTNAME.$DOMAINNAME`).
 
-**Note:**: Variables in `.env` are expanded in the `docker-compose.yml` file **only** and **not** in the container. The file `env-mailserver` serves this case where environment variables are used in the container.
+**Note:** Variables in `.env` are expanded in the `docker-compose.yml` file **only** and **not** in the container. The file `mailserver.env` serves this case where environment variables are used in the container.
 
 **Note:** If you want to use a bare domain (host name equals domain name) see [FAQ](https://github.com/tomav/docker-mailserver/wiki/FAQ-and-Tips#can-i-use-nakedbare-domains-no-host-name).
 
 ### Get up and running
 
+#### Default - Without SELinux
+
 ``` BASH
 docker-compose up -d mail
+
 ./setup.sh email add <user@domain> [<password>]
 ./setup.sh config dkim
 ```
+
+#### With SELinux
+
+Edit the files `.env` and `docker-compose.yml`. In `.env` uncomment the variable `SELINUX_LABEL`. If you want the volume bind mount to be shared among other containers switch `-Z` to `-z`. In `docker-compose.yml`, uncomment the line that contains `${SELINUX_LABEL}` and comment out or remove the line above.
+  
+**Note:** When using `setup.sh` use the option `-z` or `-Z`. This should match the value of `SELINUX_LABEL` in the `.env` file. See the [wiki](https://github.com/tomav/docker-mailserver/wiki/Setup-docker-mailserver-using-the-script-setup.sh) for more information regarding `setup.sh`.
+
+``` BASH
+docker-compose up -d mail
+
+./setup.sh -Z email add <user@domain> [<password>]
+./setup.sh -Z config dkim
+```
+
+### DNS - DKIM
 
 Now that the keys are generated, you can configure your DNS server by just pasting the content of `config/opendkim/keys/domain.tld/mail.txt` in your `domain.tld.hosts` zone.
 
 ### Miscellaneous
 
-#### Restart and update the container
+#### Supported Operating Systems
+
+We are currently providing support for Linux. Windows is _not_ supported and is known to cause problems. Similarly, macOS is _not officially_ supported - but you may get it to work there. In the end, Linux should be your preferred operating system for this image, especially when using this mailserver in production.
+
+#### Support for Multiple Domains
+
+`docker-mailserver` supports multiple domains out of the box, so you can do this:
+
+``` BASH
+./setup.sh email add user1@docker.example.com
+./setup.sh email add user1@mail.example.de
+./setup.sh email add user1@server.example.org
+```
+
+#### Updating `docker-mailserver`
 
 ``` BASH
 docker-compose down
-docker pull tvial/docker-mailserver:latest
+docker pull tvial/docker-mailserver:<VERSION TAG>
 docker-compose up -d mail
 ```
 
@@ -157,6 +186,8 @@ See the [wiki](https://github.com/tomav/docker-mailserver/wiki) for further deta
 ## Examples
 
 ### With Relevant Environmental Variables
+
+This example provides you only with a basic example of what a minimal setup could look like. We **strongly recommend** that you go through the configuration file yourself and adjust everything to your needs.
 
 ``` YAML
 version: '3.8'
@@ -655,6 +686,42 @@ Note: activate this only if you are confident in your bayes database for identif
 #### Dovecot
 
 The following variables overwrite the default values for ```/etc/dovecot/dovecot-ldap.conf.ext```.
+
+##### DOVECOT_BASE
+
+- **empty** =>  same as `LDAP_SEARCH_BASE`
+- => Tell Dovecot to search only below this base entry. (e.g. `ou=people,dc=domain,dc=com`)
+
+##### DOVECOT_DEFAULT_PASS_SCHEME
+
+- **empty** =>  `SSHA`
+- => Select one crypt scheme for password hashing from this list of [password schemes](https://doc.dovecot.org/configuration_manual/authentication/password_schemes/).
+
+##### DOVECOT_DN
+
+- **empty** => same as `LDAP_BIND_DN`
+- => Bind dn for LDAP connection. (e.g. `cn=admin,dc=domain,dc=com`)
+
+##### DOVECOT_DNPASS
+
+- **empty** => same as `LDAP_BIND_PW`
+- => Password for LDAP dn sepecifified in `DOVECOT_DN`.
+
+##### DOVECOT_HOSTS
+
+- **empty** => same as `LDAP_SERVER_HOST`
+- => Specify a space separated list of LDAP hosts.
+
+##### DOVECOT_LDAP_VERSION
+
+- **empty** => 3
+- 2 => LDAP version 2 is used
+- 3 => LDAP version 3 is used
+
+##### DOVECOT_AUTH_BIND
+
+- **empty** => no
+- yes => Enable [LDAP authentication binds](https://wiki.dovecot.org/AuthDatabase/LDAP/AuthBinds)
 
 ##### DOVECOT_USER_FILTER
 
