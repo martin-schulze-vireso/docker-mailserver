@@ -182,6 +182,7 @@ function _docker_image
 {
   if ${USE_CONTAINER}
   then
+    echo "Running: " ${CRI} exec "${USE_TTY}" "${CONTAINER_NAME}" "${@}" >&2
     # reuse existing container specified on command line
     ${CRI} exec "${USE_TTY}" "${CONTAINER_NAME}" "${@}"
   else
@@ -233,7 +234,7 @@ function _main
   CONTAINER_NAME=${INFO#*;}
   # echo "DEBUG: INFO=${INFO}"
   # echo "DEBUG: PRE_IMAGE_NAME=${IMAGE_NAME}"
-  # echo "DEBUG: PRE_CONTAINER_NAME=${CONTAINER_NAME}"
+  echo "DEBUG: PRE_CONTAINER_NAME=${CONTAINER_NAME}"
 
   if [[ -z ${IMAGE_NAME} ]]
   then
@@ -264,6 +265,7 @@ function _main
         # container specified, connect to running instance
         CONTAINER_NAME="${OPTARG}"
         USE_CONTAINER=true
+        echo "Using container $CONTAINER_NAME" >&2
         ;;
 
       h )
